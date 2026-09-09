@@ -23,7 +23,7 @@ jobs:
       - name: Copy web game into Android assets
         run: mkdir -p android/app/src/main/assets/www && cp -R www/. android/app/src/main/assets/www/
       - name: Build debug APK
-        run: gradle --no-daemon --stacktrace assembleDebug
+        run: cd android && gradle --no-daemon --stacktrace assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
