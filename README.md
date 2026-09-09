@@ -15,4 +15,4 @@
 2. GitHubの `Actions` で **Build Android APK** を実行する。
 3. 終わったら実行結果の `Artifacts` にある `White-Room-Button-APK` をダウンロードする。
 
-最初にダウンロードされるのはテスト用のdebug APKです。Google Playに出す段階では、署名付きrelease APK/AABに変える。
+`android/` はWebViewだけを使う小さなAndroidアプリ本体です。GitHub Actionsの **Build Android APK** がpush時にdebug APKを作り、Artifactとして公開します。

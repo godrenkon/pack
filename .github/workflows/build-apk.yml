@@ -13,21 +13,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
-      - name: Install packages
-        run: npm install
-      - name: Create Android project
-        run: npx cap add android
-      - name: Copy game into Android app
-        run: npx cap copy android
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.10.2
+      - name: Copy web game into Android assets
+        run: mkdir -p android/app/src/main/assets/www && cp -R www/. android/app/src/main/assets/www/
       - name: Build debug APK
-        run: cd android && ./gradlew assembleDebug
+        run: gradle --no-daemon --stacktrace assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
