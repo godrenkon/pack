@@ -1,0 +1,8 @@
+{
+  "name": "White Room Button",
+  "short_name": "White Room",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "background_color": "#111827",
+  "theme_color": "#111827"
+}
