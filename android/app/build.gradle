@@ -6,6 +6,10 @@ android {
     namespace "com.suiram.whiteroom"
     compileSdk 35
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId "com.suiram.whiteroom"
         minSdk 23
