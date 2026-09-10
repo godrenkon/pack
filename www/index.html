@@ -1,34 +1,141 @@
 <!doctype html>
 <html lang="ja">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-    <meta name="theme-color" content="#111827" />
-    <title>White Room Button</title>
-    <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
-    <main id="game-shell">
-      <canvas id="game" aria-label="White Room Button game"></canvas>
-      <section id="hud" aria-live="polite">
-        <p id="score-label">SCORE</p>
-        <p id="score">0</p>
-        <p id="status">赤いボタンまで歩こう</p>
-      </section>
-      <button id="push" type="button" disabled>PUSH</button>
-      <button id="reset" type="button" aria-label="ゲームを最初からやり直す">↺</button>
-      <div id="joystick" aria-label="移動スティック">
-        <div id="joystick-knob"></div>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#161616">
+  <title>White Room Clicker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app">
+    <section id="home-screen" class="screen home-screen">
+      <div class="home-room" aria-hidden="true">
+        <div class="home-wall"><span>WHITE ROOM<br>CLICKER</span></div>
+        <div class="home-floor"></div>
       </div>
-      <div id="look-hint">右側をなぞって視点を動かす</div>
-      <div id="start-screen">
-        <h1>WHITE ROOM</h1>
-        <p>白い部屋を歩いて、中央の赤いボタンを押せ。</p>
-        <button id="start" type="button">START</button>
-        <small>PC: WASD / 矢印キー + ドラッグ</small>
+      <div class="home-shade"></div>
+      <div class="home-content">
+        <p class="eyebrow">3D CLICKER GAME</p>
+        <h1>WHITE ROOM<br><span>CLICKER</span></h1>
+        <p id="home-status" class="home-status">最初のゲームを始めよう</p>
+        <button id="new-game-button" class="primary-button">スタート</button>
+        <button id="load-button" class="secondary-button">ロード</button>
+        <button id="records-button" class="text-button">ランキングを見る</button>
       </div>
-    </main>
-    <script src="game.js"></script>
-  </body>
+      <p class="home-note">自動セーブ対応・セーブデータ最大5個</p>
+    </section>
+
+    <section id="game-screen" class="screen game-screen" hidden>
+      <header class="hud">
+        <div>
+          <span>CLICK</span>
+          <strong id="hud-clicks">0</strong>
+        </div>
+        <div>
+          <span>AUTO / s</span>
+          <strong id="hud-auto">0</strong>
+        </div>
+        <button id="home-button" class="home-button">ホームへ</button>
+      </header>
+
+      <div class="room" aria-label="ホワイトルーム">
+        <div class="ceiling"></div>
+        <div class="back-wall">
+          <div class="score-board">
+            <p>CLICK COUNT</p>
+            <div id="wall-clicks" class="wall-number">0</div>
+            <p class="auto-label">AUTO CLICK / s</p>
+            <div id="wall-auto" class="wall-auto">0</div>
+          </div>
+          <div id="goal-board" class="goal-board">GOAL: 9999垓9999京9999兆9999億9999万9999</div>
+        </div>
+        <div class="left-wall"></div>
+        <div class="right-wall"></div>
+        <div class="floor"></div>
+
+        <button id="upgrade-power" class="upgrade-card card-power" data-upgrade="power">
+          <span class="card-type">壁の強化</span>
+          <strong>CLICK +1</strong>
+          <small id="power-cost">コスト: 25</small>
+        </button>
+        <button id="upgrade-turbo" class="upgrade-card card-turbo" data-upgrade="turbo">
+          <span class="card-type">床の強化</span>
+          <strong>CLICK ×2</strong>
+          <small id="turbo-cost">コスト: 250</small>
+        </button>
+        <button id="upgrade-auto" class="upgrade-card card-auto" data-upgrade="auto">
+          <span class="card-type">左の壁</span>
+          <strong>AUTO +1/s</strong>
+          <small id="auto-cost">コスト: 100</small>
+        </button>
+        <button id="upgrade-factory" class="upgrade-card card-factory" data-upgrade="factory">
+          <span class="card-type">右の壁</span>
+          <strong>AUTO ×2</strong>
+          <small id="factory-cost">コスト: 1,500</small>
+        </button>
+
+        <button id="main-button" class="main-button" aria-label="クリックする赤いボタン">
+          <span>CLICK</span>
+        </button>
+        <div id="auto-cursors" class="auto-cursors" aria-hidden="true">
+          <span class="cursor c1">➤</span><span class="cursor c2">➤</span>
+          <span class="cursor c3">➤</span><span class="cursor c4">➤</span>
+        </div>
+      </div>
+      <p id="game-message" class="game-message">中央の赤いボタンを押そう</p>
+    </section>
+
+    <section id="save-modal" class="modal" hidden aria-modal="true" role="dialog">
+      <div class="modal-panel save-panel">
+        <h2>セーブデータを選ぶ</h2>
+        <p id="save-modal-description">ロードするデータを選んでください。空き枠を押すと新しく始められます。</p>
+        <div id="save-slots" class="save-slots"></div>
+        <button class="secondary-button modal-close" data-close="save-modal">戻る</button>
+      </div>
+    </section>
+
+    <section id="confirm-modal" class="modal" hidden aria-modal="true" role="dialog">
+      <div class="modal-panel compact-panel">
+        <h2>ホームに戻る？</h2>
+        <p>今の進行は自動でセーブされます。</p>
+        <div class="modal-actions">
+          <button id="confirm-home" class="primary-button">ホームへ戻る</button>
+          <button class="secondary-button modal-close" data-close="confirm-modal">ゲームを続ける</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="records-modal" class="modal" hidden aria-modal="true" role="dialog">
+      <div class="modal-panel ranking-panel">
+        <h2>ランキング</h2>
+        <div class="rank-columns">
+          <div>
+            <h3>個人ランキング</h3>
+            <ol id="personal-ranking" class="ranking-list"></ol>
+          </div>
+          <div>
+            <h3>世界ランキング</h3>
+            <p class="world-offline">オンライン順位表は、サーバー接続を用意した後に公開します。</p>
+          </div>
+        </div>
+        <button id="backup-export" class="secondary-button">セーブをバックアップ</button>
+        <button id="backup-import-button" class="secondary-button">バックアップを読み込む</button>
+        <input id="backup-import" class="hidden-file-input" type="file" accept="application/json">
+        <button class="text-button modal-close" data-close="records-modal">閉じる</button>
+      </div>
+    </section>
+
+    <section id="clear-modal" class="modal" hidden aria-modal="true" role="dialog">
+      <div class="modal-panel compact-panel clear-panel">
+        <p class="eyebrow">GAME CLEAR</p>
+        <h2>9999垓まで到達！</h2>
+        <p id="clear-time"></p>
+        <p id="clear-rank"></p>
+        <button id="clear-home" class="primary-button">ホームへ</button>
+      </div>
+    </section>
+  </main>
+  <script src="game.js"></script>
+</body>
 </html>

@@ -39,14 +39,14 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.1.1
+          TAG: v0.1.${{ github.run_number }}
           APK: android/app/build/outputs/apk/debug/app-debug.apk
         run: |
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$TAG" "$APK" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "White Room Button v0.1.1" \
-              --notes "白い3D部屋を歩いて中央の赤いボタンを押すスマホ向け試作ゲーム。テスト用debug APKです。"
+              --title "White Room Clicker v0.1.${{ github.run_number }}" \
+              --notes "横画面対応のホワイトルーム・クリッカー。5枠セーブと自動クリック強化を追加しました。テスト用debug APKです。"
           else
             gh release upload "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --clobber
           fi

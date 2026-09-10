@@ -1,317 +1,300 @@
 (() => {
   "use strict";
 
-  const canvas = document.querySelector("#game");
-  const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
-  const scoreEl = document.querySelector("#score");
-  const statusEl = document.querySelector("#status");
-  const startScreen = document.querySelector("#start-screen");
-  const startBtn = document.querySelector("#start");
-  const pushBtn = document.querySelector("#push");
-  const resetBtn = document.querySelector("#reset");
-  const joystick = document.querySelector("#joystick");
-  const knob = document.querySelector("#joystick-knob");
-  let state = null;
-  let startRequested = false;
-
-  // Android WebViewでもタップを確実に拾えるよう、3D初期化より先に登録する。
-  function pressStart(event) {
-    event?.preventDefault();
-    if (startRequested) return;
-    startRequested = true;
-    startScreen.hidden = true;
-    startScreen.style.display = "none";
-    if (state) state.started = true;
-  }
-  startBtn.addEventListener("pointerdown", pressStart, { passive: false });
-  startBtn.addEventListener("click", pressStart);
-
-  window.__nativeStart = () => {
-    if (!startScreen.hidden) pressStart();
+  const STORAGE_KEY = "white-room-clicker-v2";
+  const TARGET = 999999999999999999999999n;
+  const UNITS = ["", "万", "億", "兆", "京", "垓"];
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    home: $("home-screen"), game: $("game-screen"),
+    homeStatus: $("home-status"), newGame: $("new-game-button"), load: $("load-button"), records: $("records-button"),
+    main: $("main-button"), homeButton: $("home-button"),
+    hudClicks: $("hud-clicks"), hudAuto: $("hud-auto"), wallClicks: $("wall-clicks"), wallAuto: $("wall-auto"),
+    cursors: $("auto-cursors"), message: $("game-message"),
+    saveModal: $("save-modal"), saveSlots: $("save-slots"), saveDescription: $("save-modal-description"),
+    confirmModal: $("confirm-modal"), recordsModal: $("records-modal"), clearModal: $("clear-modal"),
+    personalRanking: $("personal-ranking"), clearTime: $("clear-time"), clearRank: $("clear-rank"),
+    backupExport: $("backup-export"), backupImportButton: $("backup-import-button"), backupImport: $("backup-import")
   };
 
-  if (!gl) {
-    statusEl.textContent = "この端末では3D表示に対応していません";
-    return;
-  }
+  let state = loadState();
+  let currentSlot = null;
+  let game = null;
+  let screen = "home";
+  let lastFrame = performance.now();
+  let savePickerMode = "load";
 
-  const vertexSource = `
-    attribute vec3 aPosition;
-    attribute vec3 aColor;
-    uniform mat4 uProjection;
-    uniform mat4 uView;
-    uniform mat4 uModel;
-    varying vec3 vColor;
-    varying float vLight;
-    void main() {
-      vec4 world = uModel * vec4(aPosition, 1.0);
-      vec3 fakeLight = normalize(vec3(-0.5, 1.0, 0.6));
-      vec3 normal = normalize(aPosition);
-      vLight = 0.72 + max(0.0, dot(normal, fakeLight)) * 0.28;
-      vColor = aColor;
-      gl_Position = uProjection * uView * world;
+  function defaultGame() {
+    return {
+      clicks: 0n,
+      clickPower: 1n,
+      autoPerSecond: 0n,
+      levels: { power: 0, turbo: 0, auto: 0, factory: 0 },
+      elapsedMs: 0,
+      autoProgressMs: 0,
+      completed: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+  }
+  function defaultState() { return { version: 2, slots: [null, null, null, null, null], personalRanks: [] }; }
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return defaultState();
+      const parsed = JSON.parse(raw);
+      const slots = Array.from({ length: 5 }, (_, i) => parsed.slots?.[i] || null);
+      return { version: 2, slots, personalRanks: Array.isArray(parsed.personalRanks) ? parsed.personalRanks : [] };
+    } catch { return defaultState(); }
+  }
+  function serializeGame(source) {
+    return { ...source, clicks: source.clicks.toString(), clickPower: source.clickPower.toString(), autoPerSecond: source.autoPerSecond.toString() };
+  }
+  function hydrateGame(source) {
+    const fresh = defaultGame();
+    if (!source) return fresh;
+    return {
+      ...fresh, ...source,
+      clicks: BigInt(source.clicks || 0), clickPower: BigInt(source.clickPower || 1), autoPerSecond: BigInt(source.autoPerSecond || 0),
+      levels: { ...fresh.levels, ...(source.levels || {}) }
+    };
+  }
+  function persist() {
+    if (game && currentSlot !== null) {
+      game.updatedAt = Date.now();
+      state.slots[currentSlot] = serializeGame(game);
     }
-  `;
-  const fragmentSource = `
-    precision mediump float;
-    varying vec3 vColor;
-    varying float vLight;
-    void main() { gl_FragColor = vec4(vColor * vLight, 1.0); }
-  `;
-
-  function shader(type, source) {
-    const result = gl.createShader(type);
-    gl.shaderSource(result, source);
-    gl.compileShader(result);
-    if (!gl.getShaderParameter(result, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(result));
-    return result;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    updateHome();
   }
-  function program(vs, fs) {
-    const result = gl.createProgram();
-    gl.attachShader(result, shader(gl.VERTEX_SHADER, vs));
-    gl.attachShader(result, shader(gl.FRAGMENT_SHADER, fs));
-    gl.linkProgram(result);
-    if (!gl.getProgramParameter(result, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(result));
-    return result;
+  function hasSave() { return state.slots.some(Boolean); }
+  function firstEmptySlot() { return state.slots.findIndex((slot) => !slot); }
+
+  function displayNumber(value) {
+    const n = typeof value === "bigint" ? value : BigInt(value);
+    if (n < 10000n) return n.toString();
+    const groups = [];
+    let rest = n;
+    while (rest > 0n) { groups.push(rest % 10000n); rest /= 10000n; }
+    return groups.reverse().map((group, index) => {
+      const unitIndex = groups.length - 1 - index;
+      const digits = index === 0 ? group.toString() : group.toString().padStart(4, "0");
+      return `${digits}${UNITS[unitIndex] || `e${unitIndex * 4}`}`;
+    }).join("");
   }
-
-  const drawProgram = program(vertexSource, fragmentSource);
-  const loc = {
-    position: gl.getAttribLocation(drawProgram, "aPosition"),
-    color: gl.getAttribLocation(drawProgram, "aColor"),
-    projection: gl.getUniformLocation(drawProgram, "uProjection"),
-    view: gl.getUniformLocation(drawProgram, "uView"),
-    model: gl.getUniformLocation(drawProgram, "uModel"),
-  };
-
-  const cubePositions = new Float32Array([
-    -1,-1, 1,  1,-1, 1,  1, 1, 1, -1, 1, 1,
-     1,-1,-1, -1,-1,-1, -1, 1,-1,  1, 1,-1,
-    -1, 1, 1,  1, 1, 1,  1, 1,-1, -1, 1,-1,
-    -1,-1,-1,  1,-1,-1,  1,-1, 1, -1,-1, 1,
-     1,-1, 1,  1,-1,-1,  1, 1,-1,  1, 1, 1,
-    -1,-1,-1, -1,-1, 1, -1, 1, 1, -1, 1,-1,
-  ]);
-  const cubeIndices = new Uint16Array([
-    0,1,2, 0,2,3, 4,5,6, 4,6,7, 8,9,10, 8,10,11,
-    12,13,14, 12,14,15, 16,17,18, 16,18,19, 20,21,22, 20,22,23,
-  ]);
-  const cubeColors = new Float32Array(Array.from({ length: 24 }, () => [1, 1, 1]).flat());
-  const geometry = createGeometry(cubePositions, cubeColors, cubeIndices);
-
-  function createGeometry(positions, colors, indices) {
-    const position = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, position);
-    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-    const color = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, color);
-    gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
-    const index = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
-    return { position, color, index, count: indices.length };
+  function formatTime(ms) {
+    const seconds = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = seconds % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
-
-  const identity = () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
-  const multiply = (a, b) => {
-    const out = new Float32Array(16);
-    for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) {
-      out[col * 4 + row] = a[row] * b[col * 4] + a[4 + row] * b[col * 4 + 1] + a[8 + row] * b[col * 4 + 2] + a[12 + row] * b[col * 4 + 3];
+  function boardNumber(text) {
+    const parts = text.match(/\d+(?:万|億|兆|京|垓|e\d+)?/g) || [text];
+    const mustSplit = text.length > 22 || parts.length > 4;
+    els.wallClicks.classList.toggle("two-lines", mustSplit);
+    els.wallClicks.innerHTML = mustSplit
+      ? `<span>${parts.slice(0, Math.ceil(parts.length / 2)).join("")}</span><span>${parts.slice(Math.ceil(parts.length / 2)).join("")}</span>`
+      : text;
+  }
+  function cost(kind) {
+    const level = game.levels[kind];
+    const base = { power: 25n, turbo: 250n, auto: 100n, factory: 1500n }[kind];
+    return base * (2n ** BigInt(level));
+  }
+  function updateGameUI() {
+    if (!game) return;
+    const clicks = displayNumber(game.clicks), auto = displayNumber(game.autoPerSecond);
+    els.hudClicks.textContent = clicks;
+    els.hudAuto.textContent = auto;
+    boardNumber(clicks);
+    els.wallAuto.textContent = auto;
+    els.cursors.classList.toggle("active", game.autoPerSecond > 0n);
+    ["power", "turbo", "auto", "factory"].forEach((kind) => {
+      const element = $(`${kind}-cost`);
+      const price = cost(kind);
+      element.textContent = `コスト: ${displayNumber(price)}`;
+      $("upgrade-" + kind).disabled = game.clicks < price || game.completed;
+    });
+  }
+  function updateHome() {
+    const saved = hasSave();
+    els.newGame.textContent = saved ? "新しいゲーム" : "スタート";
+    els.homeStatus.textContent = saved ? "セーブデータを選んで、続きから遊べます" : "最初のゲームを始めよう";
+  }
+  function show(id) { $(id).hidden = false; }
+  function hide(id) { $(id).hidden = true; }
+  function goHome() {
+    persist();
+    screen = "home";
+    currentSlot = null;
+    game = null;
+    els.game.hidden = true;
+    els.home.hidden = false;
+    hide("confirm-modal");
+    updateHome();
+  }
+  function startSlot(slot) {
+    currentSlot = slot;
+    game = hydrateGame(state.slots[slot]);
+    state.slots[slot] = serializeGame(game);
+    persist();
+    screen = "game";
+    els.home.hidden = true;
+    els.game.hidden = false;
+    hide("save-modal");
+    updateGameUI();
+    els.message.textContent = `セーブデータ ${slot + 1} でプレイ中`;
+  }
+  function openSavePicker(mode) {
+    savePickerMode = mode;
+    els.saveDescription.textContent = mode === "new"
+      ? "空いているセーブデータを選んで、新しく始めます。"
+      : "ロードするデータを選んでください。空き枠を押すと新しく始められます。";
+    els.saveSlots.innerHTML = "";
+    state.slots.forEach((slot, index) => {
+      const button = document.createElement("button");
+      button.className = `save-slot${slot ? " has-save" : ""}`;
+      if (slot) {
+        const saved = hydrateGame(slot);
+        button.innerHTML = `<strong>DATA ${index + 1}</strong><span>${displayNumber(saved.clicks)} click</span><em>${displayNumber(saved.autoPerSecond)}/s</em>`;
+      } else button.innerHTML = `<strong>DATA ${index + 1}</strong><span>空きデータ</span><em>ここから開始</em>`;
+      button.addEventListener("click", () => {
+        if (slot && savePickerMode === "new") {
+          els.message.textContent = "そのデータは使用中です。空きデータを選んでください。";
+          return;
+        }
+        if (!slot) state.slots[index] = serializeGame(defaultGame());
+        startSlot(index);
+      });
+      els.saveSlots.append(button);
+    });
+    show("save-modal");
+  }
+  function startNewGame() {
+    const empty = firstEmptySlot();
+    if (empty >= 0) {
+      state.slots[empty] = serializeGame(defaultGame());
+      startSlot(empty);
+    } else openSavePicker("new");
+  }
+  function addClicks(amount) {
+    if (!game || game.completed) return;
+    game.clicks += amount;
+    if (game.clicks >= TARGET) completeGame();
+    updateGameUI();
+  }
+  function buy(kind) {
+    if (!game || game.completed) return;
+    const price = cost(kind);
+    if (game.clicks < price) {
+      els.message.textContent = "クリック数が足りません";
+      return;
     }
-    return out;
-  };
-  const perspective = (fov, aspect, near, far) => {
-    const f = 1 / Math.tan(fov / 2);
-    const nf = 1 / (near - far);
-    return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0]);
-  };
-  const translationScale = (x, y, z, sx, sy, sz) => new Float32Array([sx,0,0,0, 0,sy,0,0, 0,0,sz,0, x,y,z,1]);
-  const lookAt = (eye, target, up) => {
-    let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
-    let l = Math.hypot(zx, zy, zz); zx /= l; zy /= l; zz /= l;
-    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
-    l = Math.hypot(xx, xy, xz); xx /= l; xy /= l; xz /= l;
-    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
-    return new Float32Array([xx,yx,zx,0, xy,yy,zy,0, xz,yz,zz,0, -(xx*eye[0]+xy*eye[1]+xz*eye[2]), -(yx*eye[0]+yy*eye[1]+yz*eye[2]), -(zx*eye[0]+zy*eye[1]+zz*eye[2]),1]);
-  };
-  const colorBuffer = (rgb) => {
-    const values = new Float32Array(Array.from({ length: 24 }, () => rgb).flat());
-    const buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, values, gl.STATIC_DRAW);
-    return buffer;
-  };
-
-  const white = colorBuffer([0.96, 0.97, 0.98]);
-  const gray = colorBuffer([0.79, 0.82, 0.86]);
-  const red = colorBuffer([0.9, 0.08, 0.06]);
-  const redDark = colorBuffer([0.47, 0.03, 0.02]);
-  const blue = colorBuffer([0.06, 0.39, 0.9]);
-
-  state = {
-    started: false,
-    player: { x: 0, z: 5.1, yaw: Math.PI, pitch: -0.19 },
-    keys: new Set(),
-    joystick: { x: 0, y: 0, active: false },
-    score: 0,
-    activated: false,
-    last: 0,
-  };
-
-  function reset() {
-    state.player.x = 0; state.player.z = 5.1; state.player.yaw = Math.PI; state.player.pitch = -0.19;
-    state.score = 0; state.activated = false;
-    scoreEl.textContent = "0";
-    statusEl.textContent = "赤いボタンまで歩こう";
-    pushBtn.disabled = true;
+    game.clicks -= price;
+    game.levels[kind] += 1;
+    if (kind === "power") game.clickPower += 1n;
+    if (kind === "turbo") game.clickPower *= 2n;
+    if (kind === "auto") game.autoPerSecond += 1n;
+    if (kind === "factory") game.autoPerSecond = game.autoPerSecond === 0n ? 1n : game.autoPerSecond * 2n;
+    els.message.textContent = `${$("upgrade-" + kind).querySelector("strong").textContent} を強化！`;
+    persist();
+    updateGameUI();
   }
-  resetBtn.addEventListener("click", reset);
-
-  function activate() {
-    if (!nearButton() || state.activated) return;
-    state.activated = true;
-    statusEl.textContent = "起動！ スコアが増えていく";
-    pushBtn.disabled = true;
+  function completeGame() {
+    if (game.completed) return;
+    game.completed = true;
+    const entry = { timeMs: game.elapsedMs, completedAt: Date.now() };
+    state.personalRanks.push(entry);
+    state.personalRanks.sort((a, b) => a.timeMs - b.timeMs);
+    state.personalRanks = state.personalRanks.slice(0, 10);
+    const rank = state.personalRanks.findIndex((candidate) => candidate === entry) + 1;
+    persist();
+    els.clearTime.textContent = `クリア時間: ${formatTime(game.elapsedMs)}`;
+    els.clearRank.textContent = `個人ランキング: ${rank} 位`;
+    show("clear-modal");
   }
-  pushBtn.addEventListener("click", activate);
-
-  function nearButton() {
-    return Math.hypot(state.player.x, state.player.z) < 1.6;
-  }
-
-  window.addEventListener("keydown", (event) => {
-    state.keys.add(event.key.toLowerCase());
-    if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(event.key.toLowerCase())) event.preventDefault();
-    if (event.key.toLowerCase() === "e") activate();
-  });
-  window.addEventListener("keyup", (event) => state.keys.delete(event.key.toLowerCase()));
-
-  let drag = null;
-  function updateJoystick(clientX, clientY) {
-    const box = joystick.getBoundingClientRect();
-    const cx = box.left + box.width / 2, cy = box.top + box.height / 2;
-    const dx = clientX - cx, dy = clientY - cy;
-    const radius = box.width * 0.33;
-    const length = Math.hypot(dx, dy) || 1;
-    const scale = Math.min(1, radius / length);
-    const x = dx * scale, y = dy * scale;
-    state.joystick.x = x / radius; state.joystick.y = y / radius;
-    knob.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
-  }
-  function pointerDown(event) {
-    if (!state.started || event.target.closest("button")) return;
-    const box = joystick.getBoundingClientRect();
-    if (event.clientX >= box.left - 16 && event.clientX <= box.right + 16 && event.clientY >= box.top - 16 && event.clientY <= box.bottom + 16) {
-      drag = { type: "move", id: event.pointerId };
-      state.joystick.active = true;
-      updateJoystick(event.clientX, event.clientY);
-    } else {
-      drag = { type: "look", id: event.pointerId, x: event.clientX, y: event.clientY };
+  function updateRanking() {
+    els.personalRanking.innerHTML = "";
+    if (!state.personalRanks.length) {
+      const item = document.createElement("li"); item.textContent = "まだクリア記録はありません"; els.personalRanking.append(item); return;
     }
-    canvas.setPointerCapture?.(event.pointerId);
+    state.personalRanks.forEach((entry) => {
+      const item = document.createElement("li");
+      item.textContent = `${formatTime(entry.timeMs)} (${new Date(entry.completedAt).toLocaleDateString("ja-JP")})`;
+      els.personalRanking.append(item);
+    });
   }
-  function pointerMove(event) {
-    if (!drag || drag.id !== event.pointerId) return;
-    if (drag.type === "move") updateJoystick(event.clientX, event.clientY);
-    else {
-      state.player.yaw -= (event.clientX - drag.x) * 0.008;
-      state.player.pitch = Math.max(-0.78, Math.min(0.38, state.player.pitch - (event.clientY - drag.y) * 0.006));
-      drag.x = event.clientX; drag.y = event.clientY;
+  function exportBackup() {
+    persist();
+    const raw = JSON.stringify(state);
+    if (window.AndroidSave?.exportBackup) {
+      window.AndroidSave.exportBackup(utf8ToBase64(raw));
+      return;
     }
+    const blob = new Blob([raw], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = "white-room-clicker-save.json"; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  function pointerUp(event) {
-    if (!drag || drag.id !== event.pointerId) return;
-    if (drag.type === "move") {
-      state.joystick.x = 0; state.joystick.y = 0; state.joystick.active = false;
-      knob.style.transform = "translate(-50%, -50%)";
-    }
-    drag = null;
+  function importBackupText(text) {
+    try {
+        const imported = JSON.parse(text);
+        if (!Array.isArray(imported.slots)) throw new Error("invalid");
+        state = {
+          version: 2,
+          slots: Array.from({ length: 5 }, (_, i) => imported.slots[i] || null),
+          personalRanks: Array.isArray(imported.personalRanks) ? imported.personalRanks : []
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        updateHome(); updateRanking();
+        alert("バックアップを読み込みました");
+    } catch { alert("このファイルは読み込めませんでした"); }
   }
-  canvas.addEventListener("pointerdown", pointerDown);
-  canvas.addEventListener("pointermove", pointerMove);
-  canvas.addEventListener("pointerup", pointerUp);
-  canvas.addEventListener("pointercancel", pointerUp);
-
-  function resize() {
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    const width = Math.floor(canvas.clientWidth * ratio), height = Math.floor(canvas.clientHeight * ratio);
-    if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; gl.viewport(0, 0, width, height); }
+  function importBackup(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { importBackupText(reader.result); els.backupImport.value = ""; };
+    reader.readAsText(file);
   }
-  window.addEventListener("resize", resize);
-
-  function update(delta) {
-    const p = state.player;
-    let forward = (state.keys.has("w") || state.keys.has("arrowup") ? 1 : 0) - (state.keys.has("s") || state.keys.has("arrowdown") ? 1 : 0);
-    let side = (state.keys.has("d") || state.keys.has("arrowright") ? 1 : 0) - (state.keys.has("a") || state.keys.has("arrowleft") ? 1 : 0);
-    forward += -state.joystick.y; side += state.joystick.x;
-    const turn = (state.keys.has("q") ? 1 : 0) - (state.keys.has("e") ? 1 : 0);
-    p.yaw += turn * delta * 1.8;
-    const length = Math.hypot(forward, side);
-    if (length > 0) {
-      forward /= Math.max(1, length); side /= Math.max(1, length);
-      const speed = 3.1 * delta;
-      p.x += (Math.sin(p.yaw) * forward + Math.cos(p.yaw) * side) * speed;
-      p.z += (Math.cos(p.yaw) * forward - Math.sin(p.yaw) * side) * speed;
-      p.x = Math.max(-6.25, Math.min(6.25, p.x));
-      p.z = Math.max(-6.25, Math.min(6.25, p.z));
-    }
-    if (state.activated) { state.score += delta * 12; scoreEl.textContent = String(Math.floor(state.score)); }
-    const canPush = nearButton() && !state.activated;
-    pushBtn.disabled = !canPush;
-    if (canPush) statusEl.textContent = "赤いボタンをPUSH！";
-  }
-
-  function bindColor(buffer) {
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.vertexAttribPointer(loc.color, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(loc.color);
-  }
-  function draw(model, colors) {
-    gl.bindBuffer(gl.ARRAY_BUFFER, geometry.position);
-    gl.vertexAttribPointer(loc.position, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(loc.position);
-    bindColor(colors);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, geometry.index);
-    gl.uniformMatrix4fv(loc.model, false, model);
-    gl.drawElements(gl.TRIANGLES, geometry.count, gl.UNSIGNED_SHORT, 0);
-  }
-
-  function render() {
-    resize();
-    gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE);
-    gl.clearColor(0.82, 0.85, 0.89, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.useProgram(drawProgram);
-    const p = state.player;
-    const facing = [Math.sin(p.yaw) * Math.cos(p.pitch), Math.sin(p.pitch), Math.cos(p.yaw) * Math.cos(p.pitch)];
-    const eye = [p.x, 1.45, p.z];
-    const target = [eye[0] + facing[0], eye[1] + facing[1], eye[2] + facing[2]];
-    gl.uniformMatrix4fv(loc.projection, false, perspective(Math.PI / 3.1, canvas.width / canvas.height, 0.05, 50));
-    gl.uniformMatrix4fv(loc.view, false, lookAt(eye, target, [0, 1, 0]));
-
-    // 白い箱状の部屋（床、天井、4つの壁）
-    draw(translationScale(0, -0.14, 0, 7.2, 0.14, 7.2), white);
-    draw(translationScale(0, 3.2, 0, 7.2, 0.08, 7.2), white);
-    draw(translationScale(0, 1.5, -7, 7.2, 1.7, 0.08), white);
-    draw(translationScale(0, 1.5, 7, 7.2, 1.7, 0.08), white);
-    draw(translationScale(-7, 1.5, 0, 0.08, 1.7, 7.2), gray);
-    draw(translationScale(7, 1.5, 0, 0.08, 1.7, 7.2), gray);
-
-    // ボタン台と赤いボタン
-    draw(translationScale(0, 0.12, 0, 0.82, 0.12, 0.82), gray);
-    draw(translationScale(0, state.activated ? 0.22 : 0.34, 0, 0.56, state.activated ? 0.10 : 0.22, 0.56), red);
-    draw(translationScale(0, 0.06, 0, 0.68, 0.06, 0.68), redDark);
-
-    // 開始位置を見失わないための小さな青いマーカー
-    if (!state.activated) draw(translationScale(0, 0.04, 5.1, 0.16, 0.04, 0.16), blue);
-  }
-
+  function utf8ToBase64(text) { return btoa(unescape(encodeURIComponent(text))); }
+  function base64ToUtf8(value) { return decodeURIComponent(escape(atob(value))); }
+  window.__receiveAndroidBackup = (base64) => importBackupText(base64ToUtf8(base64));
   function frame(now) {
-    const delta = Math.min(0.05, (now - state.last) / 1000 || 0);
-    state.last = now;
-    if (state.started) update(delta);
-    render();
+    const dt = Math.min(1000, now - lastFrame);
+    lastFrame = now;
+    if (screen === "game" && game && !game.completed) {
+      game.elapsedMs += dt;
+      if (game.autoPerSecond > 0n) {
+        game.autoProgressMs += dt;
+        const fullSeconds = Math.floor(game.autoProgressMs / 1000);
+        if (fullSeconds > 0) {
+          game.autoProgressMs -= fullSeconds * 1000;
+          addClicks(game.autoPerSecond * BigInt(fullSeconds));
+        }
+      }
+    }
     requestAnimationFrame(frame);
   }
-  reset();
+
+  els.newGame.addEventListener("click", startNewGame);
+  els.load.addEventListener("click", () => openSavePicker("load"));
+  els.records.addEventListener("click", () => { updateRanking(); show("records-modal"); });
+  els.main.addEventListener("pointerdown", (event) => { event.preventDefault(); addClicks(game?.clickPower || 1n); });
+  document.querySelectorAll("[data-upgrade]").forEach((button) => button.addEventListener("click", () => buy(button.dataset.upgrade)));
+  els.homeButton.addEventListener("click", () => show("confirm-modal"));
+  $("confirm-home").addEventListener("click", goHome);
+  $("clear-home").addEventListener("click", () => { hide("clear-modal"); goHome(); });
+  document.querySelectorAll(".modal-close").forEach((button) => button.addEventListener("click", () => hide(button.dataset.close)));
+  els.backupExport.addEventListener("click", exportBackup);
+  els.backupImportButton.addEventListener("click", () => {
+    if (window.AndroidSave?.requestImport) window.AndroidSave.requestImport();
+    else els.backupImport.click();
+  });
+  els.backupImport.addEventListener("change", () => importBackup(els.backupImport.files[0]));
+  document.addEventListener("visibilitychange", () => { if (document.hidden) persist(); });
+  setInterval(() => { if (screen === "game") persist(); }, 5000);
+
+  updateHome();
   requestAnimationFrame(frame);
 })();
