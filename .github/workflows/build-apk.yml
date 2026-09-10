@@ -20,6 +20,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
+      - name: Keep Android debug signing key for app updates
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: white-room-clicker-debug-signing-key-v1
       - name: Copy web game into Android assets
         run: mkdir -p android/app/src/main/assets/www && cp -R www/. android/app/src/main/assets/www/
       - name: Set increasing Android version
