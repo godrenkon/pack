@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   apk:
@@ -29,3 +29,17 @@ jobs:
         with:
           name: White-Room-Button-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.1.0
+          APK: android/app/build/outputs/apk/debug/app-debug.apk
+        run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" "$APK" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "White Room Button v0.1.0" \
+              --notes "白い3D部屋を歩いて中央の赤いボタンを押すスマホ向け試作ゲーム。テスト用debug APKです。"
+          else
+            gh release upload "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --clobber
+          fi
