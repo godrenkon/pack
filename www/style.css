@@ -141,6 +141,9 @@ body { overscroll-behavior: none; touch-action: none; }
   font-size: 19px;
   font-weight: 900;
   letter-spacing: .12em;
+  touch-action: manipulation;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 @media (max-width: 420px) {

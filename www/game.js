@@ -11,6 +11,19 @@
   const resetBtn = document.querySelector("#reset");
   const joystick = document.querySelector("#joystick");
   const knob = document.querySelector("#joystick-knob");
+  let state = null;
+  let startRequested = false;
+
+  // Android WebViewでもタップを確実に拾えるよう、3D初期化より先に登録する。
+  function pressStart(event) {
+    event?.preventDefault();
+    if (startRequested) return;
+    startRequested = true;
+    startScreen.hidden = true;
+    if (state) state.started = true;
+  }
+  startBtn.addEventListener("pointerdown", pressStart, { passive: false });
+  startBtn.addEventListener("click", pressStart);
 
   if (!gl) {
     statusEl.textContent = "この端末では3D表示に対応していません";
@@ -130,7 +143,7 @@
   const redDark = colorBuffer([0.47, 0.03, 0.02]);
   const blue = colorBuffer([0.06, 0.39, 0.9]);
 
-  const state = {
+  state = {
     started: false,
     player: { x: 0, z: 5.1, yaw: Math.PI, pitch: -0.19 },
     keys: new Set(),
@@ -147,8 +160,6 @@
     statusEl.textContent = "赤いボタンまで歩こう";
     pushBtn.disabled = true;
   }
-  function start() { state.started = true; startScreen.hidden = true; canvas.focus?.(); }
-  startBtn.addEventListener("click", start);
   resetBtn.addEventListener("click", reset);
 
   function activate() {
