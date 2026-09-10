@@ -20,10 +20,15 @@
     if (startRequested) return;
     startRequested = true;
     startScreen.hidden = true;
+    startScreen.style.display = "none";
     if (state) state.started = true;
   }
   startBtn.addEventListener("pointerdown", pressStart, { passive: false });
   startBtn.addEventListener("click", pressStart);
+
+  window.__nativeStart = () => {
+    if (!startScreen.hidden) pressStart();
+  };
 
   if (!gl) {
     statusEl.textContent = "この端末では3D表示に対応していません";

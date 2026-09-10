@@ -22,6 +22,13 @@ jobs:
           gradle-version: 8.10.2
       - name: Copy web game into Android assets
         run: mkdir -p android/app/src/main/assets/www && cp -R www/. android/app/src/main/assets/www/
+      - name: Set increasing Android version
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: 0.1.${{ github.run_number }}
+        run: |
+          sed -i "s/versionCode [0-9][0-9]*/versionCode ${VERSION_CODE}/" android/app/build.gradle
+          sed -i "s/versionName \"[^\"]*\"/versionName \"${VERSION_NAME}\"/" android/app/build.gradle
       - name: Build debug APK
         run: cd android && gradle --no-daemon --stacktrace assembleDebug
       - name: Upload APK

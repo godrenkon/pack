@@ -3,6 +3,7 @@ package com.suiram.whiteroom;
 import android.app.Activity;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.view.MotionEvent;
 import android.view.View;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -21,6 +22,13 @@ public class MainActivity extends Activity {
         webView.setBackgroundColor(Color.BLACK);
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setWebViewClient(new WebViewClient());
+        webView.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                webView.evaluateJavascript(
+                        "if (window.__nativeStart) window.__nativeStart();", null);
+            }
+            return false;
+        });
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);

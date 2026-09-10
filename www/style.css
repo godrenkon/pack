@@ -126,6 +126,7 @@ body { overscroll-behavior: none; touch-action: none; }
 }
 
 #start-screen h1, #start-screen p { margin: 0; }
+#start-screen[hidden] { display: none !important; }
 #start-screen h1 { font-size: clamp(34px, 10vw, 58px); letter-spacing: .08em; }
 #start-screen p { max-width: 330px; font-weight: 700; line-height: 1.7; }
 #start-screen small { opacity: .74; }
